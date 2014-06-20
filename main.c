@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 #include "soapH.h"
 #include "soapStub.h"
 #include "wsdd.nsmap"
 
-#define ERR_FAIL 1
 #define ERR_OK   0
+#define ERR_FAIL 1
+#define ERR_RESOLUTION_NOT_SUPPORTED 2
 
 typedef int errStatus;
 char mediaEP[50];
@@ -21,8 +21,10 @@ typedef struct videoResolution
   int height;
 }t_videoResolution;
 
+t_videoResolution *supportedResolutions;
+int noOfSupportedResolutions = 0;
 
-errStatus libCleanup()
+errStatus cleanup()
 {   
   errStatus status = ERR_OK;
   struct soap soap;
@@ -120,7 +122,7 @@ errStatus connectCamera(char *deviceAddress)
   return status;
 }
 
-errStatus getSupportedResolutions(t_videoResolution *supportedResolutions, int noOfSupportedResolutions)
+errStatus getSupportedResolutions()
 {
   errStatus status = ERR_OK;
   struct soap soap;
@@ -220,11 +222,31 @@ errStatus getSupportedResolutions(t_videoResolution *supportedResolutions, int n
   return status;
 }
 
+errStatus checkSupportForNewResolution(t_videoResolution newResolution)
+{
+  errStatus status = ERR_OK;
+
+  int resAvail = 0;
+  for(resAvail = 0; resAvail < noOfSupportedResolutions; resAvail++)
+    {
+      if(!memcmp(&supportedResolutions[resAvail], &newResolution, sizeof(t_videoResolution)))
+	 return ERR_OK;
+    }
+
+  return ERR_FAIL;    
+}
+
 errStatus setResolution(t_videoResolution newResolution)
 {
   errStatus status = ERR_OK;
   struct soap soap;
   
+  if(checkSupportForNewResolution(newResolution) != ERR_OK)
+    {
+      status = ERR_RESOLUTION_NOT_SUPPORTED;
+      goto exitLabel;
+    }
+
   struct _trt__GetVideoEncoderConfiguration getVideoEncoderConfigurationRequest;
   getVideoEncoderConfigurationRequest.ConfigurationToken = (char *)malloc(sizeof(videoEncoderToken));
   strcpy(getVideoEncoderConfigurationRequest.ConfigurationToken, videoEncoderToken);
@@ -246,8 +268,6 @@ errStatus setResolution(t_videoResolution newResolution)
     }
 
    struct _trt__SetVideoEncoderConfiguration setVideoEncoderConfigurationRequest;
-   //if(isNewResolutionSupported(new, supported) == ERR_OK)
-   //{
    getVideoEncoderConfigurationResponse.Configuration->Encoding = newResolution.Encoding;
    getVideoEncoderConfigurationResponse.Configuration->Resolution->Width = newResolution.width;
    getVideoEncoderConfigurationResponse.Configuration->Resolution->Height = newResolution.height;
@@ -276,7 +296,7 @@ errStatus setResolution(t_videoResolution newResolution)
 	     getProfilesResponse.Profiles->VideoSourceConfiguration->token, 
 	     getProfilesResponse.Profiles->token);
     }
-  
+
  exitLabel:
   return status;
 }
@@ -286,9 +306,7 @@ int main(int argc, char **argv)
 {
   errStatus status = ERR_OK;
   char deviceAddress[50];
-  t_videoResolution *supportedResolutions;
   t_videoResolution newResolution;
-  int noOfSupportedResolutions = 0;
   
   status = discoverDevices(deviceAddress);
   if(status != ERR_OK)
@@ -300,18 +318,22 @@ int main(int argc, char **argv)
     goto exitLabel;
   printf("Media URL set to %s\n", mediaEP);
 
-  status = getSupportedResolutions(supportedResolutions, noOfSupportedResolutions);
+  status = getSupportedResolutions();
   if(status != ERR_OK)
     goto exitLabel;
 
-  /*
+  
   newResolution.Encoding = tt__VideoEncoding__H264;
   newResolution.width = 1280;
   newResolution.height = 720;
   status = setResolution(newResolution);
+  if(status == ERR_RESOLUTION_NOT_SUPPORTED)
+    printf("Resolution not supported\n");
+  else
+    printf("Resolution supported\n");
   if(status != ERR_OK)
     goto exitLabel;
-  */
+
 #if 0
    struct _trt__GetVideoSourceConfiguration getVideoSourceConfigurationRequest;
    getVideoSourceConfigurationRequest.ConfigurationToken = (char *)malloc(sizeof(videoSrcToken));
@@ -340,6 +362,6 @@ int main(int argc, char **argv)
 #endif
    
  exitLabel:
-   libCleanup();
+   cleanup();
    return status;
 }
